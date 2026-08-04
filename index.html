@@ -30,12 +30,72 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.6; transform: scale(1.2); }
   }
+  @keyframes longPulse {
+    0%, 100% { 
+      box-shadow: 0 0 0 0 rgba(227,165,72,0.8);
+      transform: scale(1);
+    }
+    50% { 
+      box-shadow: 0 0 0 15px rgba(227,165,72,0);
+      transform: scale(1.1);
+    }
+  }
   .fade-up { animation: fadeUp .25s ease both; }
   .glow-target { animation: pulseGlow 1.1s ease-out 4; }
+  .glow-long { animation: longPulse 1.5s ease-in-out infinite; }
   .pulse-dot { animation: pulseDot 2s ease-in-out infinite; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-thumb { background: #3a4150; border-radius: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
+
+  /* Responsive Design */
+  @media (max-width: 768px) {
+    .warehouse-map-container {
+      padding: 16px 10px !important;
+    }
+    .shelf-block {
+      transform: scale(0.85);
+      transform-origin: top center;
+    }
+    .detail-panel {
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+    .top-bar {
+      padding: 10px 12px !important;
+    }
+    .nav-buttons {
+      flex-wrap: wrap;
+    }
+    .search-container {
+      min-width: 150px !important;
+    }
+    .main-content {
+      padding: 16px 12px 80px !important;
+    }
+    .kpi-grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+    .dashboard-grid {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .shelf-block {
+      transform: scale(0.95);
+      transform-origin: top center;
+    }
+    .detail-panel {
+      width: 380px !important;
+    }
+  }
+
+  @media (min-width: 1025px) {
+    .detail-panel {
+      width: 420px !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -111,13 +171,16 @@ function Icon({ name, size = 16, color = "currentColor", style }) {
 
 /* =========================================================================
    WAREHOUSE TOPOLOGY
+   الترتيب الجديد: F (الأقرب للمدخل), A, B, C, D, E, G (الأبعد/المقابل للمدخل)
    ========================================================================= */
 const SHELVES = [
+  { id: "F", columns: 5, sides: 1 },  // الأقرب لحائط المدخل
   { id: "A", columns: 6, sides: 1 },
   { id: "B", columns: 4, sides: 2 },
   { id: "C", columns: 4, sides: 2 },
   { id: "D", columns: 3, sides: 2 },
   { id: "E", columns: 5, sides: 1 },
+  { id: "G", columns: 5, sides: 1 },  // المقابل للمدخل
 ];
 const LEVELS = 5;
 const LOW_STOCK_THRESHOLD = 6;
@@ -169,7 +232,9 @@ function WarehouseApp() {
   const [view, setView] = useState("map");
   const [selectedLoc, setSelectedLoc] = useState(null);
   const [searchHighlight, setSearchHighlight] = useState(null);
+  const [glowTimeout, setGlowTimeout] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanCallback, setScanCallback] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [toast, setToast] = useState(null);
   const [syncStatus, setSyncStatus] = useState("idle");
@@ -372,6 +437,26 @@ function WarehouseApp() {
     products.flatMap((p) => p.history.map((h) => ({ ...h, productName: p.name, barcode: p.barcode })))
       .sort((a, b) => new Date(b.ts) - new Date(a.ts)), [products]);
 
+  // دالة للبحث عن منتج وإظهار موقعه مع وميض 30 ثانية
+  const handleSearch = useCallback((loc) => {
+    // إلغاء الوميض السابق إن وجد
+    if (glowTimeout) {
+      clearTimeout(glowTimeout);
+    }
+    
+    setView("map");
+    setSearchHighlight(loc);
+    setSelectedLoc(loc);
+    
+    // وميض لمدة 30 ثانية
+    const timeout = setTimeout(() => {
+      setSearchHighlight(null);
+      setGlowTimeout(null);
+    }, 30000);
+    
+    setGlowTimeout(timeout);
+  }, [glowTimeout]);
+
   if (!ready) return <SplashLoader T={T} />;
   if (!session) return <LoginScreen T={T} onLogin={login} />;
 
@@ -379,10 +464,10 @@ function WarehouseApp() {
     <div className="font-body" style={{ background: T.bg, color: T.text, minHeight: "100vh", width: "100%" }}>
       <TopBar T={T} dark={dark} setDark={setDark} session={session} onLogout={logout}
         view={view} setView={setView} onScan={() => setScannerOpen(true)}
-        onSearch={(loc) => { setView("map"); setSearchHighlight(loc); setSelectedLoc(loc); setTimeout(() => setSearchHighlight(null), 4500); }}
+        onSearch={handleSearch}
         products={products} syncStatus={syncStatus} />
 
-      <main style={{ maxWidth: 1320, margin: "0 auto", padding: "20px 16px 80px" }}>
+      <main className="main-content" style={{ maxWidth: 1320, margin: "0 auto", padding: "20px 16px 80px" }}>
         {view === "map" && <WarehouseMap T={T} locationIndex={locationIndex} onSelect={setSelectedLoc} highlight={searchHighlight} />}
         {view === "dashboard" && <Dashboard T={T} stats={stats} products={products} />}
         {view === "history" && <HistoryPanel T={T} history={allHistory} />}
@@ -394,18 +479,27 @@ function WarehouseApp() {
           onRemove={(productId, qty, worker) => applyRemove(productId, selectedLoc, qty, worker)}
           onAdd={(barcode, name, qty, worker) => applyAdd(barcode, name, qty, selectedLoc, worker)}
           onUpdateProductName={updateProductName}
-          onUpdateLocation={updateLocation} />
+          onUpdateLocation={updateLocation}
+          onScanBarcode={(callback) => { setScanCallback(() => callback); setScannerOpen(true); }} />
       )}
 
-      {scannerOpen && <BarcodeScanner T={T} onClose={() => setScannerOpen(false)} onDetected={(code) => { setScannerOpen(false); setScanResult(code); }} />}
+      {scannerOpen && <BarcodeScanner T={T} onClose={() => { setScannerOpen(false); setScanCallback(null); }} onDetected={(code) => { 
+        setScannerOpen(false); 
+        if (scanCallback) {
+          scanCallback(code);
+          setScanCallback(null);
+        } else {
+          setScanResult(code);
+        }
+      }} />}
 
       {scanResult && (
         <ScanResultPanel T={T} barcode={scanResult} products={products} session={session}
           onClose={() => setScanResult(null)}
           onConfirm={(name, qty, location, worker) => {
             applyAdd(scanResult, name, qty, location, worker);
-            setScanResult(null); setView("map"); setSearchHighlight(location);
-            setTimeout(() => setSearchHighlight(null), 4500);
+            setScanResult(null);
+            handleSearch(location);
           }} />
       )}
 
@@ -472,7 +566,7 @@ function LoginScreen({ T, onLogin }) {
 }
 
 /* =========================================================================
-   TOP BAR - تم حذف زر المزامنة وإضافة نقطة خضراء
+   TOP BAR
    ========================================================================= */
 function TopBar({ T, dark, setDark, session, onLogout, view, setView, onScan, onSearch, products, syncStatus }) {
   const [q, setQ] = useState("");
@@ -495,7 +589,7 @@ function TopBar({ T, dark, setDark, session, onLogout, view, setView, onScan, on
   const dotColor = syncStatus === "synced" ? T.green : syncStatus === "syncing" ? T.gold : syncStatus === "error" ? T.red : T.gray;
 
   return (
-    <div style={{ position: "sticky", top: 0, zIndex: 30, background: T.bg + "F2", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.border}` }}>
+    <div className="top-bar" style={{ position: "sticky", top: 0, zIndex: 30, background: T.bg + "F2", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.border}` }}>
       <div style={{ maxWidth: 1320, margin: "0 auto", padding: "12px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: T.gold, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -504,13 +598,13 @@ function TopBar({ T, dark, setDark, session, onLogout, view, setView, onScan, on
           <div className="font-display" style={{ fontWeight: 700, fontSize: 16 }}>Stock Tour Expert</div>
         </div>
 
-        <nav style={{ display: "flex", gap: 2 }}>
+        <nav className="nav-buttons" style={{ display: "flex", gap: 2 }}>
           <NavBtn id="map" icon="map" label="الخريطة" />
           <NavBtn id="dashboard" icon="grid" label="لوحة التحكم" />
           <NavBtn id="history" icon="history" label="السجل" />
         </nav>
 
-        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 180 }}>
+        <div className="search-container" style={{ position: "relative", flex: "1 1 220px", minWidth: 180 }}>
           <Icon name="search" size={14} color={T.muted} style={{ position: "absolute", right: 10, top: 10 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ابحث عن منتج أو باركود…"
             style={{ width: "100%", background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 9, padding: "8px 30px 8px 10px", color: T.text, fontSize: 13, outline: "none" }} />
@@ -554,7 +648,6 @@ function TopBar({ T, dark, setDark, session, onLogout, view, setView, onScan, on
               <div style={{ fontSize: 12.5, fontWeight: 600 }}>{session.name}</div>
               <div style={{ fontSize: 10.5, color: T.muted }}>{session.role}</div>
             </div>
-            {/* النقطة الخضراء بجانب الاسم */}
             <span
               className="pulse-dot"
               title={syncStatus === "synced" ? "متصل" : syncStatus === "syncing" ? "مزامنة…" : syncStatus === "error" ? "خطأ" : "غير متصل"}
@@ -602,7 +695,7 @@ function WarehouseMap({ T, locationIndex, onSelect, highlight }) {
         <Legend T={T} />
       </div>
 
-      <div style={{
+      <div className="warehouse-map-container" style={{
         background: T.floor, border: `1px solid ${T.border}`, borderRadius: 18, padding: "26px 18px",
         backgroundImage: `linear-gradient(${T.border}55 1px, transparent 1px), linear-gradient(90deg, ${T.border}55 1px, transparent 1px)`,
         backgroundSize: "26px 26px", overflowX: "auto",
@@ -658,7 +751,7 @@ function ShelfBlock({ T, shelf, locationIndex, highlight, onSelect, cellRefs }) 
                 return (
                   <div key={code} ref={(el) => (cellRefs.current[code] = el)}
                     onClick={() => onSelect(code)} onMouseEnter={() => setHover(code)} onMouseLeave={() => setHover(null)}
-                    className={isHighlight ? "glow-target" : ""}
+                    className={isHighlight ? "glow-long" : ""}
                     title={entries.length > 0 ? `${entries.map(e => e.product.name).join(", ")} · ${totalQty}` : "فارغ"}
                     style={{
                       width: 36, height: 20, borderRadius: 4, cursor: "pointer",
@@ -700,7 +793,7 @@ function ShelfBlock({ T, shelf, locationIndex, highlight, onSelect, cellRefs }) 
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+    <div className="shelf-block" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       <div style={{
         fontWeight: 800, fontSize: 22, color: T.gold, marginBottom: 8, fontFamily: "'Space Grotesk', sans-serif",
         width: 32, height: 32, borderRadius: 8, background: "rgba(227,165,72,0.12)", border: `1px solid ${T.gold}55`,
@@ -723,9 +816,9 @@ function ShelfBlock({ T, shelf, locationIndex, highlight, onSelect, cellRefs }) 
 }
 
 /* =========================================================================
-   DETAIL PANEL - مع ميزة إضافة منتج جديد واضحة
+   DETAIL PANEL
    ========================================================================= */
-function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUpdateProductName, onUpdateLocation }) {
+function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUpdateProductName, onUpdateLocation, onScanBarcode }) {
   const [mode, setMode] = useState(entries.length > 0 ? "view" : "create");
   const [name, setName] = useState("");
   const [barcode, setBarcode] = useState("");
@@ -739,7 +832,6 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
   const [isEditingName, setIsEditingName] = useState(false);
   const [newProductName, setNewProductName] = useState("");
 
-  // حالة إضافة منتج جديد
   const [showAddNew, setShowAddNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newBarcode, setNewBarcode] = useState("");
@@ -762,17 +854,23 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
       return;
     }
     onAdd(newBarcode.trim(), newName.trim(), newQty, newWorker.trim());
-    // إعادة تعيين الحقول
     setNewName("");
     setNewBarcode("");
     setNewQty(1);
     setShowAddNew(false);
   };
 
+  const handleScanBarcode = () => {
+    onScanBarcode((code) => {
+      setNewBarcode(code);
+      showToast(`تم قراءة الباركود: ${code}`, "ok");
+    });
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", justifyContent: "flex-end" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)" }} />
-      <div className="fade-up" style={{ position: "relative", width: 420, maxWidth: "92vw", height: "100%", background: T.surface, borderRight: `1px solid ${T.border}`, padding: 22, overflowY: "auto" }}>
+      <div className="detail-panel fade-up" style={{ position: "relative", width: 420, maxWidth: "92vw", height: "100%", background: T.surface, borderRight: `1px solid ${T.border}`, padding: 22, overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div className="font-mono" style={{ color: T.gold, fontWeight: 700, fontSize: 15 }}>{code}</div>
           <button onClick={onClose} style={{ background: "transparent", border: "none", color: T.muted, cursor: "pointer" }}><Icon name="x" size={18} /></button>
@@ -783,7 +881,6 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
 
         {entries.length > 0 ? (
           <>
-            {/* عرض المنتجات الموجودة في هذا المكان */}
             <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: T.text, display: "flex", alignItems: "center", gap: 6 }}>
@@ -812,7 +909,6 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
               ))}
             </div>
 
-            {/* زر إضافة منتج جديد واضح */}
             {!showAddNew ? (
               <button 
                 onClick={() => setShowAddNew(true)}
@@ -847,7 +943,27 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
                 <TextInput T={T} value={newName} onChange={setNewName} placeholder="مثال: مفتاح عزم 1/2 بوصة" />
                 
                 <FieldLabel T={T}>الباركود</FieldLabel>
-                <TextInput T={T} value={newBarcode} onChange={setNewBarcode} placeholder="امسح أو اكتب الباركود" mono />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <TextInput T={T} value={newBarcode} onChange={setNewBarcode} placeholder="امسح أو اكتب الباركود" mono />
+                  </div>
+                  <button 
+                    onClick={handleScanBarcode}
+                    style={{
+                      padding: "9px 12px",
+                      borderRadius: 9,
+                      border: `1px solid ${T.gold}`,
+                      background: "rgba(227,165,72,0.1)",
+                      color: T.gold,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4
+                    }}
+                    title="مسح الباركود">
+                    <Icon name="scan" size={16} />
+                  </button>
+                </div>
                 
                 <FieldLabel T={T}>الكمية</FieldLabel>
                 <NumberInput T={T} value={newQty} setValue={setNewQty} />
@@ -879,7 +995,6 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
               </div>
             )}
 
-            {/* تفاصيل المنتج المحدد */}
             {entries[selectedProductIdx] && (
               <>
                 <div style={{ background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
@@ -966,7 +1081,27 @@ function DetailPanel({ T, code, entries, session, onClose, onRemove, onAdd, onUp
             <FieldLabel T={T}>اسم المنتج</FieldLabel>
             <TextInput T={T} value={name} onChange={setName} placeholder="مثال: مفتاح عزم 1/2 بوصة" />
             <FieldLabel T={T}>الباركود</FieldLabel>
-            <TextInput T={T} value={barcode} onChange={setBarcode} placeholder="امسح أو اكتب الباركود" mono />
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <TextInput T={T} value={barcode} onChange={setBarcode} placeholder="امسح أو اكتب الباركود" mono />
+              </div>
+              <button 
+                onClick={() => onScanBarcode((code) => { setBarcode(code); showToast(`تم قراءة الباركود: ${code}`, "ok"); })}
+                style={{
+                  padding: "9px 12px",
+                  borderRadius: 9,
+                  border: `1px solid ${T.gold}`,
+                  background: "rgba(227,165,72,0.1)",
+                  color: T.gold,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4
+                }}
+                title="مسح الباركود">
+                <Icon name="scan" size={16} />
+              </button>
+            </div>
             <FieldLabel T={T}>الكمية</FieldLabel>
             <NumberInput T={T} value={qty} setValue={setQty} />
             <FieldLabel T={T}>اسم العامل</FieldLabel>
@@ -1177,14 +1312,14 @@ function Dashboard({ T, stats, products }) {
     <div className="fade-up">
       <div className="font-display" style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>لوحة التحكم</div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 22 }}>
+      <div className="kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 22 }}>
         <KpiCard T={T} icon="box" label="إجمالي المنتجات" value={stats.totalProducts} color={T.gold} />
         <KpiCard T={T} icon="boxes" label="إجمالي الوحدات في المخزون" value={stats.totalStock} color={T.green} />
         <KpiCard T={T} icon="alert" label="تنبيهات المخزون المنخفض" value={stats.lowStock.length} color={T.red} />
         <KpiCard T={T} icon="trending" label="الحركات المسجلة" value={products.reduce((s, p) => s + p.history.length, 0)} color={T.goldBright} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16 }}>
+      <div className="dashboard-grid" style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 16 }}>
         <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, padding: 18, minHeight: 280 }}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>العناصر الأكثر استخداماً</div>
           {stats.mostUsed.length === 0 && <div style={{ fontSize: 12.5, color: T.muted }}>لا يوجد استخدام مسجل بعد.</div>}
